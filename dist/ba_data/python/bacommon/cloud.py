@@ -1,19 +1,56 @@
 # Released under the MIT License. See LICENSE for details.
 #
-"""Functionality related to cloud functionality."""
+"""Cloud related functionality.
+
+.. warning::
+
+  This is an internal api and subject to change at any time. Do not use
+  it in mod code.
+"""
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Annotated
+
 from enum import Enum
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Annotated, override
 
 from efro.message import Message, Response
 from efro.dataclassio import ioprepped, IOAttrs
+from bacommon.analytics import AnalyticsEvent
+from bacommon.securedata import SecureDataChecker
 from bacommon.transfer import DirectoryManifest
 from bacommon.login import LoginType
+from bacommon.docui import DocUIRequest, DocUIResponse
+import bacommon.displayitem as ditm
+import bacommon.clienteffect as clfx
 
 if TYPE_CHECKING:
     pass
+
+
+class WebLocation(Enum):
+    """Set of places we can be directed on ballistica.net."""
+
+    ACCOUNT_EDITOR = 'e'
+    ACCOUNT_DELETE_SECTION = 'd'
+
+
+@ioprepped
+@dataclass
+class CloudVals:
+    """Engine config values provided by the master server.
+
+    Used to convey things such as debug logging.
+    """
+
+    #: Fully qualified type names we should emit extra debug logs for
+    #: when garbage-collected (for debugging ref loops).
+    gc_debug_types: Annotated[
+        list[str], IOAttrs('gct', store_default=False)
+    ] = field(default_factory=list)
+
+    #: Max number of objects of a given type to emit debug logs for.
+    gc_debug_type_limit: Annotated[int, IOAttrs('gdl', store_default=False)] = 2
 
 
 @ioprepped
@@ -21,6 +58,7 @@ if TYPE_CHECKING:
 class LoginProxyRequestMessage(Message):
     """Request send to the cloud to ask for a login-proxy."""
 
+    @override
     @classmethod
     def get_response_types(cls) -> list[type[Response] | None]:
         return [LoginProxyRequestResponse]
@@ -31,8 +69,11 @@ class LoginProxyRequestMessage(Message):
 class LoginProxyRequestResponse(Response):
     """Response to a request for a login proxy."""
 
-    # URL to direct the user to for login.
+    # URL to direct the user to for sign in.
     url: Annotated[str, IOAttrs('u')]
+
+    # URL to use for overlay-web-browser sign ins.
+    url_overlay: Annotated[str, IOAttrs('uo')]
 
     # Proxy-Login id for querying results.
     proxyid: Annotated[str, IOAttrs('p')]
@@ -49,6 +90,7 @@ class LoginProxyStateQueryMessage(Message):
     proxyid: Annotated[str, IOAttrs('p')]
     proxykey: Annotated[str, IOAttrs('k')]
 
+    @override
     @classmethod
     def get_response_types(cls) -> list[type[Response] | None]:
         return [LoginProxyStateQueryResponse]
@@ -85,6 +127,7 @@ class LoginProxyCompleteMessage(Message):
 class PingMessage(Message):
     """Standard ping."""
 
+    @override
     @classmethod
     def get_response_types(cls) -> list[type[Response] | None]:
         return [PingResponse]
@@ -103,6 +146,7 @@ class TestMessage(Message):
 
     testfoo: Annotated[int, IOAttrs('f')]
 
+    @override
     @classmethod
     def get_response_types(cls) -> list[type[Response] | None]:
         return [TestResponse]
@@ -136,6 +180,7 @@ class WorkspaceFetchMessage(Message):
     workspaceid: Annotated[str, IOAttrs('w')]
     state: Annotated[WorkspaceFetchState, IOAttrs('s')]
 
+    @override
     @classmethod
     def get_response_types(cls) -> list[type[Response] | None]:
         return [WorkspaceFetchResponse]
@@ -162,6 +207,7 @@ class WorkspaceFetchResponse(Response):
 class MerchAvailabilityMessage(Message):
     """Can we show merch link?"""
 
+    @override
     @classmethod
     def get_response_types(cls) -> list[type[Response] | None]:
         return [MerchAvailabilityResponse]
@@ -187,6 +233,7 @@ class SignInMessage(Message):
     description: Annotated[str, IOAttrs('d', soft_default='-')]
     apptime: Annotated[float, IOAttrs('at', soft_default=-1.0)]
 
+    @override
     @classmethod
     def get_response_types(cls) -> list[type[Response] | None]:
         return [SignInResponse]
@@ -205,6 +252,11 @@ class SignInResponse(Response):
 class ManageAccountMessage(Message):
     """Message asking for a manage-account url."""
 
+    weblocation: Annotated[WebLocation, IOAttrs('l')] = (
+        WebLocation.ACCOUNT_EDITOR
+    )
+
+    @override
     @classmethod
     def get_response_types(cls) -> list[type[Response] | None]:
         return [ManageAccountResponse]
@@ -216,3 +268,219 @@ class ManageAccountResponse(Response):
     """Here's that sign-in result you asked for, boss."""
 
     url: Annotated[str | None, IOAttrs('u')]
+
+
+@ioprepped
+@dataclass
+class StoreQueryMessage(Message):
+    """Message asking about purchasable stuff and store related state."""
+
+    @override
+    @classmethod
+    def get_response_types(cls) -> list[type[Response] | None]:
+        return [StoreQueryResponse]
+
+
+@ioprepped
+@dataclass
+class StoreQueryResponse(Response):
+    """Here's that store info you asked for, boss."""
+
+    class Result(Enum):
+        """Our overall result."""
+
+        SUCCESS = 's'
+        ERROR = 'e'
+
+    @dataclass
+    class Purchase:
+        """Info about a purchasable thing."""
+
+        purchaseid: Annotated[str, IOAttrs('id')]
+
+    # Overall result; all data is undefined if not SUCCESS.
+    result: Annotated[Result, IOAttrs('r')]
+
+    tokens: Annotated[int, IOAttrs('t')]
+    gold_pass: Annotated[bool, IOAttrs('g')]
+
+    available_purchases: Annotated[list[Purchase], IOAttrs('p')]
+    token_info_url: Annotated[str, IOAttrs('tiu')]
+
+
+@ioprepped
+@dataclass
+class SecureDataCheckMessage(Message):
+    """Was this data signed by the master-server?."""
+
+    data: Annotated[bytes, IOAttrs('d')]
+    signature: Annotated[bytes, IOAttrs('s')]
+
+    @override
+    @classmethod
+    def get_response_types(cls) -> list[type[Response] | None]:
+        return [SecureDataCheckResponse]
+
+
+@ioprepped
+@dataclass
+class SecureDataCheckResponse(Response):
+    """Here's the result of that data check, boss."""
+
+    # Whether the data signature was valid.
+    result: Annotated[bool, IOAttrs('v')]
+
+
+@ioprepped
+@dataclass
+class SecureDataCheckerRequest(Message):
+    """Can I get a checker over here?."""
+
+    @override
+    @classmethod
+    def get_response_types(cls) -> list[type[Response] | None]:
+        return [SecureDataCheckerResponse]
+
+
+@ioprepped
+@dataclass
+class SecureDataCheckerResponse(Response):
+    """Here's that checker ya asked for, boss."""
+
+    checker: Annotated[SecureDataChecker, IOAttrs('c')]
+
+
+@ioprepped
+@dataclass
+class CloudValsRequest(Message):
+    """Can a fella get some cloud vals around here?."""
+
+    @override
+    @classmethod
+    def get_response_types(cls) -> list[type[Response] | None]:
+        return [CloudValsResponse]
+
+
+@ioprepped
+@dataclass
+class CloudValsResponse(Response):
+    """Here's them cloud vals ya asked for, boss."""
+
+    vals: Annotated[CloudVals, IOAttrs('v')]
+
+
+@ioprepped
+@dataclass
+class ChestActionMessage(Message):
+    """Request action about a chest."""
+
+    class Action(Enum):
+        """Types of actions we can request."""
+
+        # Unlocking (for free or with tokens).
+        UNLOCK = 'u'
+
+        # Watched an ad to reduce wait.
+        AD = 'ad'
+
+    action: Annotated[Action, IOAttrs('a')]
+
+    # Tokens we are paying (only applies to unlock).
+    token_payment: Annotated[int, IOAttrs('t')]
+
+    chest_id: Annotated[str, IOAttrs('i')]
+
+    @override
+    @classmethod
+    def get_response_types(cls) -> list[type[Response] | None]:
+        return [ChestActionResponse]
+
+
+@ioprepped
+@dataclass
+class ChestActionResponse(Response):
+    """Here's the results of that action you asked for, boss."""
+
+    # Tokens that were actually charged.
+    tokens_charged: Annotated[int, IOAttrs('t')] = 0
+
+    # If present, signifies the chest has been opened and we should show
+    # the user this stuff that was in it.
+    contents: Annotated[list[ditm.Wrapper] | None, IOAttrs('c')] = None
+
+    # If contents are present, which of the chest's prize-sets they
+    # represent.
+    prizeindex: Annotated[int, IOAttrs('i')] = 0
+
+    # Printable error if something goes wrong.
+    error: Annotated[str | None, IOAttrs('e')] = None
+
+    # Printable warning. Shown in orange with an error sound. Does not
+    # mean the action failed; only that there's something to tell the
+    # users such as 'It looks like you are faking ad views; stop it or
+    # you won't have ad options anymore.'
+    warning: Annotated[str | None, IOAttrs('w', store_default=False)] = None
+
+    # Printable success message. Shown in green with a cash-register
+    # sound. Can be used for things like successful wait reductions via
+    # ad views. Used in builds earlier than 22311; can remove once
+    # 22311+ is ubiquitous.
+    success_msg: Annotated[str | None, IOAttrs('s', store_default=False)] = None
+
+    # Effects to show on the client. Replaces warning and success_msg in
+    # build 22311 or newer.
+    effects: Annotated[
+        list[clfx.Effect], IOAttrs('fx', store_default=False)
+    ] = field(default_factory=list)
+
+
+@ioprepped
+@dataclass
+class FulfillDocUIRequest(Message):
+    """Can a fella get a doc-ui round here?"""
+
+    request: Annotated[DocUIRequest, IOAttrs('r')]
+    domain: Annotated[str, IOAttrs('d')]
+
+    @override
+    @classmethod
+    def get_response_types(cls) -> list[type[Response] | None]:
+        return [FulfillDocUIResponse]
+
+
+@ioprepped
+@dataclass
+class FulfillDocUIResponse(Response):
+    """Here's that doc-ui you asked for, boss."""
+
+    response: Annotated[DocUIResponse, IOAttrs('r')]
+
+
+@ioprepped
+@dataclass
+class AnalyticsEventMessage(Message):
+    """Have a nice analytics event!"""
+
+    event: Annotated[AnalyticsEvent, IOAttrs('e')]
+
+
+@ioprepped
+@dataclass
+class AuthRequestMessage(Message):
+    """Request access to a server for a current account."""
+
+    global_app_instance_uuid: Annotated[str, IOAttrs('a')]
+
+    @override
+    @classmethod
+    def get_response_types(cls) -> list[type[Response] | None]:
+        return [AuthRequestResponse]
+
+
+@ioprepped
+@dataclass
+class AuthRequestResponse(Response):
+    """Here's that access ya asked for boss."""
+
+    error: Annotated[str | None, IOAttrs('e')]
+    token: Annotated[str | None, IOAttrs('t')]

@@ -1,6 +1,7 @@
 # Released under the MIT License. See LICENSE for details.
 #
 """Functionality related to terminal IO."""
+
 from __future__ import annotations
 
 import sys
@@ -68,15 +69,23 @@ class TerminalColor(Enum):
 
 
 def _default_color_enabled() -> bool:
-    """Return whether we should enable ANSI color codes by default."""
+    """Return whether we enable ANSI color codes by default."""
     import platform
 
-    # If we're not attached to a terminal, go with no-color.
+    # If our stdout is not attached to a terminal, go with no-color.
+    assert sys.__stdout__ is not None
     if not sys.__stdout__.isatty():
         return False
 
-    # Another common way to say the terminal can't do fancy stuff like color:
-    if os.environ.get('TERM') == 'dumb':
+    termenv = os.environ.get('TERM')
+
+    # If TERM is unset, don't attempt color (this is currently the case
+    # in xcode).
+    if termenv is None:
+        return False
+
+    # A common way to say the terminal can't do fancy stuff like color.
+    if termenv == 'dumb':
         return False
 
     # On windows, try to enable ANSI color mode.
@@ -87,7 +96,6 @@ def _default_color_enabled() -> bool:
     return True
 
 
-# noinspection PyPep8Naming
 def _windows_enable_color() -> bool:
     """Attempt to enable ANSI color on windows terminal; return success."""
     # pylint: disable=invalid-name, import-error, undefined-variable
@@ -307,15 +315,9 @@ class ClrNever(ClrBase):
 
 
 _envval = os.environ.get('EFRO_TERMCOLORS')
-_color_enabled: bool = (
+color_enabled: bool = (  # pylint: disable=invalid-name
     True
     if _envval == '1'
-    else False
-    if _envval == '0'
-    else _default_color_enabled()
+    else False if _envval == '0' else _default_color_enabled()
 )
-Clr: type[ClrBase]
-if _color_enabled:
-    Clr = ClrAlways
-else:
-    Clr = ClrNever
+Clr: type[ClrBase] = ClrAlways if color_enabled else ClrNever

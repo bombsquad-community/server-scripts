@@ -1,6 +1,12 @@
 # Released under the MIT License. See LICENSE for details.
 #
-"""Functionality related to game builds."""
+"""Functionality related to game builds.
+
+.. warning::
+
+  This is an internal api and subject to change at any time. Do not use
+  it in mod code.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +27,7 @@ class BuildInfoSet:
 
     @dataclass
     class Entry:
-        """Info about a particular build."""
+        """Info about a particular app build."""
 
         filename: Annotated[str, IOAttrs('fname')]
         size: Annotated[int, IOAttrs('size')]

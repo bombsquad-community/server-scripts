@@ -1,6 +1,12 @@
 # Released under the MIT License. See LICENSE for details.
 #
-"""Network related data and functionality."""
+"""Network related data and functionality.
+
+.. warning::
+
+  This is an internal api and subject to change at any time. Do not use
+  it in mod code.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +26,7 @@ class ServerNodeEntry:
     """Information about a specific server."""
 
     zone: Annotated[str, IOAttrs('r')]
+    latlong: Annotated[tuple[float, float] | None, IOAttrs('ll')]
     address: Annotated[str, IOAttrs('a')]
     port: Annotated[int, IOAttrs('p')]
 
@@ -31,6 +38,19 @@ class ServerNodeQueryResponse:
 
     # The current utc time on the master server.
     time: Annotated[datetime.datetime, IOAttrs('t')]
+
+    # Where the master server sees the query as coming from.
+    latlong: Annotated[tuple[float, float] | None, IOAttrs('ll')]
+
+    ping_per_dist: Annotated[float, IOAttrs('ppd')]
+    max_dist: Annotated[float, IOAttrs('md')]
+
+    # If this came from a bootstrap server, which zone was it in.
+    bootstrap_zone: Annotated[str | None, IOAttrs('b', soft_default=None)]
+
+    debug_log_seconds: Annotated[
+        float | None, IOAttrs('d', store_default=False)
+    ] = None
 
     # If present, something went wrong, and this describes it.
     error: Annotated[str | None, IOAttrs('e', store_default=False)] = None
@@ -49,6 +69,7 @@ class PrivateHostingState:
     unavailable_error: str | None = None
     party_code: str | None = None
     tickets_to_host_now: int = 0
+    tokens_to_host_now: int = 0
     minutes_until_free_host: float | None = None
     free_host_minutes_remaining: float | None = None
 
@@ -63,9 +84,9 @@ class PrivateHostingConfig:
     randomize: bool = False
     tutorial: bool = False
     custom_team_names: tuple[str, str] | None = None
-    custom_team_colors: tuple[
-        tuple[float, float, float], tuple[float, float, float]
-    ] | None = None
+    custom_team_colors: (
+        tuple[tuple[float, float, float], tuple[float, float, float]] | None
+    ) = None
     playlist: list[dict[str, Any]] | None = None
     exit_minutes: float = 120.0
     exit_minutes_unclean: float = 180.0
@@ -78,6 +99,7 @@ class PrivatePartyConnectResult:
     """Info about a server we get back when connecting."""
 
     error: str | None = None
-    addr: str | None = None
+    address4: Annotated[str | None, IOAttrs('addr')] = None
+    address6: Annotated[str | None, IOAttrs('addr6')] = None
     port: int | None = None
     password: str | None = None
